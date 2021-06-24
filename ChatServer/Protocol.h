@@ -16,6 +16,8 @@
 #define dfCLIENT_MAX_NAME	20
 #define dfROOM_MAX_NAME		256
 
+#define dfROOM_MAX_COUNT 10
+
 //------------------------------------------------------
 //  패킷헤더
 //
