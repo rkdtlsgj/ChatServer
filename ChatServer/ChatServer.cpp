@@ -66,6 +66,7 @@ int CompleteRecvPacket(stSession* pClinet, DWORD dwUserNumber);
 void SendUnicast(stSession* pSession, st_PACKET_HEADER* pHeader, CPacket* pPakcet);
 void SendBroadcast(st_PACKET_HEADER* pHeader, CPacket* pPakcet);
 void SendBroadcast_Room(stRoom* pRoom, stClient* pClient, st_PACKET_HEADER* pHeader, CPacket* pPakcet);
+void SendBroadcast(stSession* pExSession, st_PACKET_HEADER* pHeader, CPacket* pPakcet);
 
 BOOL netPacket_ReqRoomCreate(DWORD dwUserNumber, CPacket* pPacket);
 
@@ -82,6 +83,10 @@ BOOL packetProc_ReqRoomEnter(stClient* pClient, stSession* pSession, CPacket* pP
 BOOL packetProc_ResRoomEnter(stClient* pClient, stSession* pSession, stRoom* pRoom, BYTE byResult);
 void MakePacket_RoomEnter(stClient* pClient,st_PACKET_HEADER* pHeader, CPacket* pPacket, BYTE byResult, stRoom* pRoom);
 
+BOOL packetProc_ReqChat(DWORD dwUserNumber, stSession* pSession, CPacket* pPacket);
+BOOL packetProc_ResChat(DWORD dwUserNumber, stSession* pSession, CPacket* pPacket);
+
+BOOL packetProc_ResUserEnter(stClient* pClient, stRoom* pRoom);
 
 stClient* FindClient(DWORD dwUserNumber);
 stSession* FindSession(DWORD dwUserNumber);
@@ -267,9 +272,7 @@ void NetRecv_Proc(DWORD dwUserNumber)
 	if (iResult == SOCKET_ERROR || iResult == 0)
 	{
 		closesocket(pSession->socket);
-		//Dis
-		wprintf(L"%d\n", pSession->cRecvQ.DirectEnqueueSize());
-		wprintf(L" Socker Close User No : %d\n", g_ClientInfo[dwUserNumber]->dwClinetNumber);
+		wprintf(L" Socket Close User No : %d\n", g_ClientInfo[dwUserNumber]->dwClinetNumber);
 		return;
 	}
 
@@ -321,7 +324,6 @@ void NetSend_Proc(DWORD dwUserNumber)
 		}
 
 		closesocket(pClient->socket);
-		//dis
 		wprintf(L" Socker Close User No : %d\n", g_ClientInfo[dwUserNumber]->dwClinetNumber);
 
 		return;
@@ -355,6 +357,7 @@ BOOL PacketProc(stSession* pSession, DWORD dwUserNumber, WORD wMsgType, CPacket*
 		return packetProc_ReqRoomEnter(pClient,pSession, pPacket);
 		break;
 	case df_REQ_CHAT:
+		return packetProc_ReqChat(dwUserNumber, pSession, pPacket);
 		break;
 	case df_REQ_ROOM_LEAVE:
 		break;
@@ -492,6 +495,39 @@ BOOL packetProc_ResLogin(stClient* pClient,stSession* pSession, BYTE byResult)
 	SendUnicast(pSession, &header, &cPacket);
 	return TRUE;
 }
+BOOL packetProc_ReqChat(DWORD dwUserNumber, stSession* pSession, CPacket* pPacket)
+{
+	return packetProc_ResChat(dwUserNumber, pSession, pPacket);
+}
+
+BOOL packetProc_ResChat(DWORD dwUserNumber,stSession* pSession, CPacket* pPacket)
+{
+	st_PACKET_HEADER header;
+	CPacket cPacket;
+
+	WORD wMsgSize = 0;
+	WCHAR wcMsg[dfRECV_BUFF];
+	memset(wcMsg, '\0', dfRECV_BUFF);
+
+	*pPacket >> wMsgSize;
+	pPacket->GetData((char*)wcMsg, wMsgSize);
+
+
+	cPacket << dwUserNumber;
+	cPacket << wMsgSize;
+	cPacket.PutData((char*)wcMsg, wMsgSize);
+
+	header.byCode = dfPACKET_CODE;
+	header.wMsgType = df_RES_CHAT;
+	header.wPayloadSize = (WORD)cPacket.GetDataSize();
+	header.byCheckSum = MakeCheckSum(&cPacket, df_RES_CHAT);
+
+	unordered_map < DWORD, stClient*>::iterator userIter = g_ClientInfo.find(dwUserNumber);
+	unordered_map < DWORD, stRoom*>::iterator pRoomInfoIter = g_RoomInfo.find(userIter->second->dwRoomNumber);
+	SendBroadcast_Room(pRoomInfoIter->second, userIter->second, &header, &cPacket);
+
+	return TRUE;
+}
 
 BOOL packetProc_ReqRoomEnter(stClient* pClient,stSession* pSession, CPacket* pPacket)
 {
@@ -510,7 +546,12 @@ BOOL packetProc_ReqRoomEnter(stClient* pClient,stSession* pSession, CPacket* pPa
 
 	wprintf(L"[ROOM Enter Req] User Number : %d / Room Number : %d\n", pClient->dwClinetNumber, dwRoomNumber);
 
-	return packetProc_ResRoomEnter(pClient,pSession, g_RoomInfo[dwRoomNumber], byResult);
+	if (packetProc_ResRoomEnter(pClient, pSession, g_RoomInfo[dwRoomNumber], byResult) == TRUE)
+	{
+		packetProc_ResUserEnter(pClient, g_RoomInfo[dwRoomNumber]);
+	}
+
+	return TRUE;
 }
 
 BOOL packetProc_ResRoomEnter(stClient* pClient, stSession* pSession, stRoom* pRoom,BYTE byResult)
@@ -524,6 +565,27 @@ BOOL packetProc_ResRoomEnter(stClient* pClient, stSession* pSession, stRoom* pRo
 
 	return TRUE;
 }
+
+BOOL packetProc_ResUserEnter(stClient* pClient, stRoom* pRoom)
+{
+	st_PACKET_HEADER stHeader;
+	CPacket packet;
+
+
+	packet.PutData((char*)pClient->cClientName, dfNICK_MAX_LEN * 2);
+	packet << pClient->dwClinetNumber;
+
+
+	stHeader.byCode = dfPACKET_CODE;
+	stHeader.byCheckSum = MakeCheckSum(&packet, df_RES_USER_ENTER);
+	stHeader.wMsgType = df_RES_USER_ENTER;
+	stHeader.wPayloadSize = packet.GetDataSize();
+
+	SendBroadcast_Room(pRoom, pClient, &stHeader, &packet);
+
+	return TRUE;
+}
+
 void MakePacket_RoomEnter(stClient* pClient, st_PACKET_HEADER* pHeader, CPacket* pPacket, BYTE byResult, stRoom* pRoom)
 {
 	WORD wTitleSize;
@@ -702,6 +764,20 @@ void SendBroadcast(st_PACKET_HEADER* pHeader, CPacket* pPakcet)
 	{
 		pClient = clientIter->second;
 		SendUnicast(pClient, pHeader, pPakcet);
+	}
+}
+
+void SendBroadcast(stSession* pExSession, st_PACKET_HEADER* pHeader, CPacket* pPakcet)
+{
+	stSession* pSession;
+
+	unordered_map<DWORD, stSession*>::iterator sessionIter;
+	for (sessionIter = g_SessionInfo.begin(); sessionIter != g_SessionInfo.end(); ++sessionIter)
+	{
+		pSession = sessionIter->second;
+
+		if(pExSession != pSession)
+			SendUnicast(pSession, pHeader, pPakcet);
 	}
 }
 
