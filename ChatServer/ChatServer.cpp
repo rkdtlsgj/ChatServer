@@ -647,7 +647,7 @@ BOOL packetProc_ResRoomDelete(stRoom* pRoom)
 
 	SendBroadcast(&header, &cPacket);
 
-	wprintf(L"[ROOM Delete Res] Room Number : %d /  Room Name : %s / Totle Room : %zd\n", pRoom->dwRoomNumber, pRoom->cRoomName, g_RoomInfo.size());
+	wprintf(L"[ROOM Delete Res] Room Number : %d /  Room Name : %s / Totle Room : %zd\n", pRoom->dwRoomNumber, pRoom->cRoomName, g_RoomInfo.size()-1);
 
 	g_RoomInfo.erase(pRoom->dwRoomNumber);
 	return TRUE;
